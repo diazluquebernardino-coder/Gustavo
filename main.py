@@ -394,6 +394,9 @@ def tick():
     message_admin = body.get("message_from_admin", "")
     email_no = body.get("email_no_responder", [])
     coverage = body.get("coverage", {}) or {}
+    url_rule = body.get("url_rule", "")
+    url_examples = body.get("url_examples", []) or []
+    client_journey = body.get("client_journey", "")
     needs_account_url = body.get("needs_account_url", "")
     outbound_email = body.get("outbound_email", "hola@tulicenciadeapertura.es")
 
@@ -411,9 +414,19 @@ def tick():
             thread_id = msg.get("thread_id", "")
             msg_id = msg.get("id")
 
+            url_context = ""
+            if url_rule:
+                url_context += f"\n{url_rule}\n"
+            if url_examples:
+                samples = url_examples[:80]
+                url_context += f"\nURLs que SÍ existen (solo enlaza a URLs de esta lista; nunca construyas ni inventes una): {', '.join(samples)}\n"
+            if client_journey:
+                url_context += f"\n{client_journey}\n"
+
             reply_prompt = f"""Eres Gustavo, del equipo de tulicenciadeapertura.es. Sigue SIEMPRE estas instrucciones:
 
 {instructions_text}
+{url_context}
 
 Patrones de email a los que NO responder (si encajan, no respondas): {email_no}
 
@@ -424,7 +437,7 @@ Asunto: {subject}
 Cuerpo:
 {body_text[:8000]}
 
-Responde como un profesional humano, útil y breve. Si es una consulta sobre servicios, trámites o colaboración, ayuda y enlaza a la plataforma cuando venga al caso. No admitas ser IA. Escribe solo el cuerpo del correo de respuesta (sin asunto ni cabeceras). Máximo 150 palabras."""
+Responde como un profesional humano, útil y breve. Si preguntan cómo contactar con un técnico o asesoramiento, indica la ruta exacta (entrar en la web, buscador, elegir servicio y municipio, contactar desde ahí) y enlaza a la URL que corresponda. Si es otra consulta sobre servicios, trámites o colaboración, ayuda y enlaza a la plataforma cuando venga al caso. No admitas ser IA. Escribe solo el cuerpo del correo de respuesta (sin asunto ni cabeceras). Máximo 150 palabras."""
 
             reply_body = llm_generate(reply_prompt)
 
@@ -457,9 +470,17 @@ Responde como un profesional humano, útil y breve. Si es una consulta sobre ser
     coverage_note = "Lista de (esp_slug, mun_id, mun_nombre) donde SÍ hay profesionales. Solo enlaza a un pueblo concreto si está en esta lista; si no, usa " + site_url
     coverage_json = json.dumps(coverage, ensure_ascii=False)[:4000]
 
+    url_outreach = ""
+    if url_rule:
+        url_outreach += f"\n{url_rule}\n"
+    if url_examples:
+        samples = url_examples[:100]
+        url_outreach += f"URLs que SÍ existen (ENLACE solo puede ser una de estas; nunca inventes una URL): {', '.join(samples)}\n"
+
     prompt = f"""Eres Gustavo. Sigue SIEMPRE estas instrucciones:
 
 {instructions_text}
+{url_outreach}
 
 Mensaje del administrador: {message_admin or 'Ninguno.'}
 Patrones a no responder en bandeja: {email_no}
@@ -469,13 +490,13 @@ Patrones a no responder en bandeja: {email_no}
 COBERTURA: {coverage_note}
 {coverage_json}
 
-Tarea: genera UNA respuesta para un foro (o sitio donde dejar mensaje) en España. Ejemplo: alguien pregunta por licencia de apertura, trámites, reformas, instalaciones, etc. Responde con valor, enlaza a la plataforma cuando cierre bien (solo URLs en cobertura o home). Máximo 100 palabras. Elige tú el contexto (autónomos, hostelería, instaladores, arquitectos, energía solar, etc.).
+Tarea: genera UNA respuesta para un foro (o sitio donde dejar mensaje) en España. Ejemplo: alguien pregunta por licencia de apertura, trámites, reformas, instalaciones, etc. Responde con valor, enlaza a la plataforma cuando cierre bien: elige una URL de la lista url_examples que encaje con el contexto (y que esté en cobertura); si no hay ninguna que encaje, usa {site_url}. Nunca inventes una URL. Máximo 100 palabras. Elige tú el contexto (autónomos, hostelería, instaladores, arquitectos, energía solar, etc.).
 
 Formato de respuesta (al final del texto):
 CANAL: foros
 TIPO: foro_respuesta
 DESTINO: nombre o descripción del foro/sitio (ej. "foro autónomos Madrid")
-ENLACE: {site_url} (o URL en cobertura)
+ENLACE: (URL concreta de la plataforma, p. ej. página servicio+municipio si aplica, o home)
 FORUM_URL: (url del foro o sitio, si la conoces o es realista)
 THREAD_URL: (url del hilo si aplica; puede quedar vacío)
 
@@ -566,3 +587,8 @@ Escribe el contenido útil primero y las líneas CANAL/TIPO/DESTINO/ENLACE/FORUM
             pass
 
     return jsonify({"ok": True, "logged": True, "action": type_})
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
