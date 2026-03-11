@@ -394,7 +394,13 @@ def health():
 def tick():
     body = request.get_json() or {}
     if not check_auth() and not check_auth_from_body(body):
-        return jsonify({"error": "Unauthorized"}), 401
+        auth_header = (request.headers.get("Authorization") or "").strip()
+        header_token = auth_header[7:].strip() if auth_header.startswith("Bearer ") else ""
+        debug = {
+            "received_header_len": len(header_token),
+            "body_has_api_key": bool(body.get("api_key")),
+        }
+        return jsonify({"error": "Unauthorized", "debug": debug}), 401
     if not GEMINI_API_KEY and not OPENAI_API_KEY:
         return jsonify({"error": "GEMINI_API_KEY or OPENAI_API_KEY required"}), 500
     limits = body.get("limits", {})
