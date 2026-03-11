@@ -37,11 +37,32 @@ HEADERS = {
 
 
 def check_auth():
+    """Acepta el token si coincide con GUSTAVO_SECRET o con GUSTAVO_WP_API_KEY (misma clave en ambos sitios)."""
     auth = request.headers.get("Authorization") or ""
     if not auth.startswith("Bearer "):
         return False
     token = auth[7:].strip()
-    return token and token == GUSTAVO_SECRET
+    if not token:
+        return False
+    if GUSTAVO_SECRET and token == GUSTAVO_SECRET:
+        return True
+    if GUSTAVO_WP_API_KEY and token == GUSTAVO_WP_API_KEY:
+        return True
+    return False
+
+
+def check_auth_from_body(body):
+    """Acepta la clave si viene en el JSON body (por si un proxy quita el header Authorization)."""
+    if not body or not isinstance(body, dict):
+        return False
+    token = (body.get("api_key") or "").strip()
+    if not token:
+        return False
+    if GUSTAVO_SECRET and token == GUSTAVO_SECRET:
+        return True
+    if GUSTAVO_WP_API_KEY and token == GUSTAVO_WP_API_KEY:
+        return True
+    return False
 
 
 def wp_get(url):
@@ -371,12 +392,11 @@ def health():
 @app.route("/", methods=["POST"])
 @app.route("/api/gustavo", methods=["POST"])
 def tick():
-    if not check_auth():
+    body = request.get_json() or {}
+    if not check_auth() and not check_auth_from_body(body):
         return jsonify({"error": "Unauthorized"}), 401
     if not GEMINI_API_KEY and not OPENAI_API_KEY:
         return jsonify({"error": "GEMINI_API_KEY or OPENAI_API_KEY required"}), 500
-
-    body = request.get_json() or {}
     limits = body.get("limits", {})
     used = limits.get("used_today", {})
     max_foros = limits.get("max_foros_day", 28)
