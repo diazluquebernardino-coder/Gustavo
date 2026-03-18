@@ -365,9 +365,117 @@ def llm_generate(prompt):
     return ""
 
 
+def tlap_generate_seo_html(municipio: str, actividad: str, precio_medio: int, precio_min: int, precio_max: int, variant: int = 0) -> str:
+    """
+    Genera un bloque HTML editorial para cada página clonada (SEO).
+    Reglas anti-invención:
+    - No inventar ordenanzas, leyes, tasas o plazos concretos atribuidos a un ayuntamiento.
+    - Plazos en modo orientativo/estimativo por fases.
+    - Contenido accionable (checklists, pasos, errores frecuentes, FAQ).
+    """
+    municipio = (municipio or "").strip()
+    actividad = (actividad or "").strip()
+    if not municipio or not actividad:
+        return ""
+
+    precio_medio = int(precio_medio or 0)
+    precio_min = int(precio_min or 0)
+    precio_max = int(precio_max or 0)
+    variant = int(variant or 0)
+
+    # Nota: solicitamos HTML "solo cuerpo", sin codefences.
+    prompt = f"""
+Eres un redactor SEO experto para tulicenciadeapertura.es.
+Objetivo: escribir un bloque editorial sustancial (NO light) para una página de servicio por municipio.
+Longitud objetivo: aprox. 850-1050 palabras totales en HTML.
+
+DATOS DE CONTEXTO
+- Municipio: {municipio}
+- Actividad: {actividad}
+- Precio medio estimado: {precio_medio} €
+- Rango de coste estimado: {precio_min} € a {precio_max} €
+- Variante interna: {variant} (usa esta variación para cambiar redacción y orden de algunos puntos).
+
+REGLAS ABSOLUTAS (anti-invención / anti-generalidades vacías)
+1) No inventes leyes concretas, artículos, ordenanzas municipales, ni tasas con cifras atribuidas a un ayuntamiento específico.
+2) No digas "depende de cada municipio" como muletilla. En su lugar, usa frases técnicas del tipo:
+   - "suele variar según el expediente, las características del local y los requerimientos técnicos/administrativos"
+   - "los plazos suelen dividirse en fase técnica y fase administrativa"
+3) Plazos: redacta estimaciones orientativas por fases (técnica vs administrativa) y explica qué hace que se muevan: requerimientos, subsanaciones, complejidad del local, carga de trabajo del expediente.
+   - Puedes usar rangos numéricos *como estimación habitual* si te ayudan a no sonar genérico, pero sin atribuirlos a normativa o a un ayuntamiento concreto.
+4) Debe sonar humano y profesional, con estructura clara y contenido útil:
+   - Checklist técnico
+   - Pasos para preparar el expediente
+   - Errores frecuentes a evitar
+   - FAQ (5 preguntas con respuestas distintas)
+5) HTML requerido:
+   - Devuelve SOLO HTML (sin ```), listo para insertarse en el contenido de WordPress.
+   - Usa encabezados y listas: <h2>, <h3>, <p>, <ul><li>.
+   - Mantén coherencia con el estilo del texto base del sitio.
+
+ESTRUCTURA OBLIGATORIA (mirar estructura del texto base y mantener secciones equivalentes)
+- Antes de los H2, incluye exactamente 2 párrafos introiales en <p> (no listas):
+  a) Uno que mencione tulicenciadeapertura.es y que invite a contactar con profesionales para {actividad} en {municipio}.
+  b) Uno que explique que abrir/ejercer la actividad requiere la licencia de actividad/apertura y una documentación técnica completa, con foco en el cumplimiento técnico (seguridad, higiene y/o requisitos del servicio) sin citar leyes concretas.
+
+- Un encabezado H2 para:
+  1) Licencia de apertura para {actividad}
+  2) Proyecto técnico para licencia de actividad
+  3) Requisitos técnicos de una {actividad} (si suena mejor, adapta "una" según gramática; pero usa H2)
+  4) Obras de adecuación del local
+  5) Coste de la licencia de actividad
+  6) Plazos de tramitación de la licencia
+  7) Importancia del estudio previo del local
+  8) Técnicos especializados en licencias de actividad
+  9) Preguntas frecuentes sobre licencias de {actividad}
+- En la sección FAQ usa 5 H3 y respuestas en <p>.
+
+ALINEACIÓN CON SEO / CONVERSIÓN
+- Incluye 2-3 menciones naturales del municipio ({municipio}) repartidas y sin repetición.
+- No sueltes solo un enlace; cada sección debe aportar información.
+
+Genera el HTML ahora.
+"""
+    out = llm_generate(prompt)
+    # Limpieza mínima: evita codefences si el modelo las pone.
+    if out:
+        out = out.replace("```html", "").replace("```", "").strip()
+    return out
+
+
 @app.route("/", methods=["GET"])
 def health():
     return jsonify({"ok": True, "service": "gustavo-worker"})
+
+@app.route("/api/tlap-seo-generate", methods=["POST"])
+def tlap_seo_generate():
+    """
+    Endpoint para que el clonador (WordPress) pida un bloque HTML editorial por municipio.
+    Devuelve: { "ok": true, "extra_html": "<h2>...</h2>..." }
+    """
+    if not GEMINI_API_KEY and not OPENAI_API_KEY:
+        return jsonify({"error": "GEMINI_API_KEY or OPENAI_API_KEY required"}), 500
+
+    body = request.get_json() or {}
+    municipio = body.get("municipio", "")
+    actividad = body.get("actividad", "")
+    precio_medio = body.get("precio_medio", 0)
+    precio_min = body.get("precio_min", 0)
+    precio_max = body.get("precio_max", 0)
+    variant = body.get("variant", 0)
+
+    extra_html = tlap_generate_seo_html(
+        municipio=municipio,
+        actividad=actividad,
+        precio_medio=precio_medio,
+        precio_min=precio_min,
+        precio_max=precio_max,
+        variant=variant,
+    )
+
+    if not extra_html:
+        return jsonify({"ok": False, "error": "empty_response"}), 200
+    return jsonify({"ok": True, "extra_html": extra_html}), 200
 
 
 @app.route("/", methods=["POST"])
@@ -453,15 +561,6 @@ Responde como un profesional humano, útil y breve. Si preguntan cómo contactar
                 if sent:
                     wp_post(mark_replied_url, {"id": msg_id})
                     send_to_wp_log("email", "inbox_reply", from_email, reply_body, site_url, "done")
-                    if message_admin and GUSTAVO_WP_URL and GUSTAVO_WP_API_KEY:
-                        try:
-                            requests.post(
-                                f"{GUSTAVO_WP_URL}/wp-json/gustavo/v1/clear-message",
-                                headers=HEADERS,
-                                timeout=10,
-                            )
-                        except Exception:
-                            pass
                     return jsonify({"ok": True, "action": "inbox_reply", "to": from_email})
             break
 
@@ -580,13 +679,8 @@ Escribe el contenido útil primero y las líneas CANAL/TIPO/DESTINO/ENLACE/FORUM
                 except Exception:
                     pass
 
-    send_to_wp_log(channel, type_, target, content, link, "done", meta={"posted_auto": posted})
-
-    if message_admin and GUSTAVO_WP_URL and GUSTAVO_WP_API_KEY:
-        try:
-            requests.post(f"{GUSTAVO_WP_URL}/wp-json/gustavo/v1/clear-message", headers=HEADERS, timeout=10)
-        except Exception:
-            pass
+    meta_log = {"posted_auto": posted, "thread_url": thread_url or "", "forum_url": forum_url or ""}
+    send_to_wp_log(channel, type_, target, content, link, "done", meta=meta_log)
 
     return jsonify({"ok": True, "logged": True, "action": type_})
 
